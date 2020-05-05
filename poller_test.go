@@ -116,3 +116,107 @@ func TestDidChange(t *testing.T) {
 		})
 	}
 }
+
+func TestRun(t *testing.T) {
+	buildCommand := func(cmd string, args ...string) func(*testing.T) []pitstop.BuildFunc {
+		return func(*testing.T) []pitstop.BuildFunc {
+			return []pitstop.BuildFunc{pitstop.BuildCommand(cmd, args...)}
+		}
+	}
+	runCommand := func(cmd string, args ...string) func(t *testing.T) pitstop.RunFunc {
+		return func(*testing.T) pitstop.RunFunc {
+			return pitstop.RunCommand(cmd, args...)
+		}
+	}
+
+	errorOnBuild := func(msg string) func(*testing.T) []pitstop.BuildFunc {
+		return func(t *testing.T) []pitstop.BuildFunc {
+			return []pitstop.BuildFunc{
+				func() error {
+					t.Error(msg)
+					return nil
+				},
+			}
+		}
+	}
+
+	errorOnRun := func(msg string) func(*testing.T) pitstop.RunFunc {
+		return func(t *testing.T) pitstop.RunFunc {
+			return func() (func(), error) {
+				t.Error(msg)
+				return func() {}, nil
+			}
+		}
+	}
+
+	type testCase struct {
+		pre  func(*testing.T) []pitstop.BuildFunc
+		run  func(*testing.T) pitstop.RunFunc
+		post func(*testing.T) []pitstop.BuildFunc
+		err  bool
+	}
+	for name, tc := range map[string]testCase{
+		"tail": {
+			run: runCommand("tail"),
+			err: false,
+		},
+		"exit 1": {
+			run: runCommand("exit", "1"),
+			err: true,
+		},
+		"all good": {
+			pre:  buildCommand("echo", "hello"),
+			run:  runCommand("tail"),
+			post: buildCommand("echo", "goodbye"),
+		},
+		"run and post aren't called on pre error": {
+			pre:  buildCommand("exit", "1"),
+			run:  errorOnRun("run shouldn't be called after a pre error"),
+			post: errorOnBuild("post shouldn't be called after a pre error"),
+			err:  true,
+		},
+		"post isnt called on run error": {
+			run:  runCommand("exit", "1"),
+			post: errorOnBuild("post shouldn't be called after a run error"),
+			err:  true,
+		},
+		"chain error": {
+			pre: func(t *testing.T) []pitstop.BuildFunc {
+				return []pitstop.BuildFunc{
+					pitstop.BuildCommand("echo", "hi"),
+					pitstop.BuildCommand("exit", "1"),
+					func() error {
+						t.Errorf("additional pre commands shouldn't be run after an error")
+						return nil
+					},
+				}
+			},
+			err: true,
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			var pre, post []pitstop.BuildFunc
+			var run pitstop.RunFunc
+			if tc.pre != nil {
+				pre = tc.pre(t)
+			}
+			if tc.run != nil {
+				run = tc.run(t)
+			}
+			if tc.post != nil {
+				post = tc.post(t)
+			}
+			stop, err := pitstop.Run(pre, run, post)
+			if err != nil {
+				if !tc.err {
+					t.Errorf("Run() err = %v; wanted no errors", err)
+				}
+				return
+			}
+			if tc.err {
+				t.Errorf("Run() err = nill; wanted an error")
+			}
+			stop()
+		})
+	}
+}
