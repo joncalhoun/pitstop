@@ -112,6 +112,8 @@ type Poller struct {
 	Post []BuildFunc
 }
 
+// Poll is a long running process that continuously scans for changes and
+// then runs the build and run functions when changes are detected.
 func (p *Poller) Poll() {
 	scanInt := p.ScanInterval
 	if scanInt == 0 {

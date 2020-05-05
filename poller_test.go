@@ -128,7 +128,6 @@ func TestRun(t *testing.T) {
 			return pitstop.RunCommand(cmd, args...)
 		}
 	}
-
 	errorOnBuild := func(msg string) func(*testing.T) []pitstop.BuildFunc {
 		return func(t *testing.T) []pitstop.BuildFunc {
 			return []pitstop.BuildFunc{
@@ -139,7 +138,6 @@ func TestRun(t *testing.T) {
 			}
 		}
 	}
-
 	errorOnRun := func(msg string) func(*testing.T) pitstop.RunFunc {
 		return func(t *testing.T) pitstop.RunFunc {
 			return func() (func(), error) {
@@ -192,6 +190,14 @@ func TestRun(t *testing.T) {
 				}
 			},
 			err: true,
+		},
+		// In an ideal world we would validate that the stop func is called
+		// after post errors, but I'm feeling lazy right now.
+		"error in post": {
+			pre:  buildCommand("echo", "hello"),
+			run:  runCommand("tail"),
+			post: buildCommand("exit", "1"),
+			err:  true,
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
