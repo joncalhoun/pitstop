@@ -95,3 +95,52 @@ func Run(pre []BuildFunc, run RunFunc, post []BuildFunc) (func(), error) {
 	}
 	return stop, nil
 }
+
+// Poller is used to poll a directory and its subdirectories for changes, and
+// then will kick off a rebuild of the app when changes are detected.
+type Poller struct {
+	// ScanInterval is the duration of time the poller will wait before scanning for new file changes. This defaults to 500ms.
+	ScanInterval time.Duration
+
+	// Dir is the directory to scan for file changes. This defaults to "." if it isn't provided.
+	Dir string
+
+	// Pre, Run, and Post represent the functions used to build and run our app.
+	// Pre functions are called first, then run, then finally the post functions.
+	Pre  []BuildFunc
+	Run  RunFunc
+	Post []BuildFunc
+}
+
+func (p *Poller) Poll() {
+	scanInt := p.ScanInterval
+	if scanInt == 0 {
+		scanInt = 500 * time.Millisecond
+	}
+	dir := p.Dir
+	if dir == "" {
+		dir = "."
+	}
+
+	var stop func()
+	var err error
+	var lastBuild time.Time
+
+	for {
+		if !DidChange(p.Dir, lastBuild) {
+			time.Sleep(scanInt)
+			continue
+		}
+		if stop != nil {
+			fmt.Println("Stopping running app...")
+			stop()
+		}
+		fmt.Println("Building & Running app...")
+		stop, err = Run(p.Pre, p.Run, p.Post)
+		if err != nil {
+			fmt.Printf("Error running: %v\n", err)
+		}
+		lastBuild = time.Now()
+		time.Sleep(scanInt)
+	}
+}
