@@ -2,6 +2,7 @@ package pitstop
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -40,11 +41,12 @@ type BuildFunc func() error
 func BuildCommand(command string, args ...string) BuildFunc {
 	return func() error {
 		cmd := exec.Command(command, args...)
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
+		var sb strings.Builder
+		cmd.Stdout = io.MultiWriter(os.Stdout, &sb)
+		cmd.Stderr = io.MultiWriter(os.Stderr, &sb)
 		err := cmd.Run()
 		if err != nil {
-			return fmt.Errorf("error building: \"%s %s\": %w", command, strings.Join(args, " "), err)
+			return fmt.Errorf("error building: \"%s %s\": %w\n%v", command, strings.Join(args, " "), err, sb.String())
 		}
 		return nil
 	}
@@ -59,14 +61,18 @@ type RunFunc func() (stop func(), err error)
 func RunCommand(command string, args ...string) RunFunc {
 	return func() (func(), error) {
 		cmd := exec.Command(command, args...)
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
+		var sb strings.Builder
+		cmd.Stdout = io.MultiWriter(os.Stdout, &sb)
+		cmd.Stderr = io.MultiWriter(os.Stderr, &sb)
 		err := cmd.Start()
 		if err != nil {
-			return nil, fmt.Errorf("error running: \"%s %s\": %w", command, strings.Join(args, " "), err)
+			return nil, fmt.Errorf("error running: \"%s %s\": %w\n%v", command, strings.Join(args, " "), err, sb.String())
 		}
 		return func() {
 			cmd.Process.Kill()
+			// I'm not 100% sure if this is right, but adding it b/c it doesn't seem
+			// to break anything and could help avoid process leaks.
+			cmd.Process.Release()
 		}, nil
 	}
 }
@@ -110,6 +116,9 @@ type Poller struct {
 	Pre  []BuildFunc
 	Run  RunFunc
 	Post []BuildFunc
+	// OnError is similar to Pre and Post, but is only called when Pre, Run, or
+	// Post encounter an error.
+	OnError func(error)
 }
 
 // Poll is a long running process that continuously scans for changes and
@@ -122,6 +131,10 @@ func (p *Poller) Poll() {
 	dir := p.Dir
 	if dir == "" {
 		dir = "."
+	}
+	onError := p.OnError
+	if onError == nil {
+		onError = func(error) {}
 	}
 
 	var stop func()
@@ -141,6 +154,7 @@ func (p *Poller) Poll() {
 		stop, err = Run(p.Pre, p.Run, p.Post)
 		if err != nil {
 			fmt.Printf("Error running: %v\n", err)
+			onError(err)
 		}
 		lastBuild = time.Now()
 		time.Sleep(scanInt)
