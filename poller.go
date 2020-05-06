@@ -110,6 +110,9 @@ type Poller struct {
 	Pre  []BuildFunc
 	Run  RunFunc
 	Post []BuildFunc
+	// OnError is similar to Pre and Post, but is only called when Pre, Run, or
+	// Post encounter an error.
+	OnError func(error)
 }
 
 // Poll is a long running process that continuously scans for changes and
@@ -122,6 +125,10 @@ func (p *Poller) Poll() {
 	dir := p.Dir
 	if dir == "" {
 		dir = "."
+	}
+	onError := p.OnError
+	if onError == nil {
+		onError = func(error) {}
 	}
 
 	var stop func()
@@ -141,6 +148,7 @@ func (p *Poller) Poll() {
 		stop, err = Run(p.Pre, p.Run, p.Post)
 		if err != nil {
 			fmt.Printf("Error running: %v\n", err)
+			onError(err)
 		}
 		lastBuild = time.Now()
 		time.Sleep(scanInt)
